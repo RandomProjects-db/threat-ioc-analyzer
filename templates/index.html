@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Threat IOC Analysis Tool</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">🔍 Threat IOC Analysis Tool</h1>
+            <p class="text-gray-600">Analyze Indicators of Compromise (IOCs) using multiple threat intelligence sources</p>
+        </div>
+
+        <!-- IOC Input Form -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">Analyze IOC</h2>
+            
+            <form id="iocForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">IOC Type</label>
+                    <select id="iocType" class="w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900">
+                        <option value="url">URL</option>
+                        <option value="ip">IP Address</option>
+                        <option value="domain">Domain</option>
+                        <option value="hash">File Hash</option>
+                    </select>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">IOC Value</label>
+                    <input type="text" id="iocValue" placeholder="Enter URL, IP, domain, or file hash..." 
+                           class="w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900 placeholder-gray-500">
+                </div>
+                
+                <button type="submit" id="analyzeBtn" 
+                        class="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50">
+                    🔍 Analyze IOC
+                </button>
+            </form>
+            
+            <!-- Quick Examples -->
+            <div class="mt-6">
+                <h3 class="text-sm font-medium text-gray-700 mb-2">Quick Examples:</h3>
+                <div class="flex flex-wrap gap-2">
+                    <button onclick="setExample('url', 'http://malware-traffic-analysis.net')" 
+                            class="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded">
+                        Suspicious URL
+                    </button>
+                    <button onclick="setExample('ip', '8.8.8.8')" 
+                            class="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded">
+                        Benign IP
+                    </button>
+                    <button onclick="setExample('domain', 'google.com')" 
+                            class="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded">
+                        Trusted Domain
+                    </button>
+                    <button onclick="setExample('hash', 'd41d8cd98f00b204e9800998ecf8427e')" 
+                            class="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded">
+                        File Hash
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loadingIndicator" class="hidden bg-blue-50 border border-blue-200 rounded-lg p-4 mb-8">
+            <div class="flex items-center">
+                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-3"></div>
+                <span class="text-blue-800">Analyzing IOC with threat intelligence sources...</span>
+            </div>
+        </div>
+
+        <!-- Analysis Results -->
+        <div id="resultsContainer" class="hidden">
+            <!-- Verdict Card -->
+            <div id="verdictCard" class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-semibold text-gray-800">Analysis Result</h2>
+                    <div id="verdictBadge" class="px-3 py-1 rounded-full text-sm font-medium"></div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <p class="text-sm text-gray-600">IOC Value</p>
+                        <p id="resultIOC" class="font-mono text-sm break-all"></p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-600">Type</p>
+                        <p id="resultType" class="font-medium"></p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-600">Confidence Score</p>
+                        <div class="flex items-center">
+                            <div class="w-full bg-gray-200 rounded-full h-2 mr-2">
+                                <div id="confidenceBar" class="h-2 rounded-full"></div>
+                            </div>
+                            <span id="confidenceScore" class="text-sm font-medium"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Intelligence Sources -->
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">Intelligence Sources</h3>
+                <div id="sourcesList" class="space-y-2"></div>
+            </div>
+
+            <!-- Detailed Analysis -->
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">Detailed Analysis</h3>
+                <div id="detailsContent" class="space-y-4"></div>
+            </div>
+
+            <!-- JSON Report -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-semibold text-gray-800">JSON Report</h3>
+                    <button onclick="downloadReport()" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm">
+                        📥 Download Report
+                    </button>
+                </div>
+                <pre id="jsonReport" class="bg-gray-50 p-4 rounded-md text-sm overflow-x-auto"></pre>
+            </div>
+        </div>
+
+        <!-- Analysis History -->
+        <div class="bg-white rounded-lg shadow-md p-6 mt-8">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">Analysis History</h2>
+            <div id="historyContainer">
+                <p class="text-gray-500">No analyses performed yet.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentResult = null;
+
+        // Set example IOC
+        function setExample(type, value) {
+            document.getElementById('iocType').value = type;
+            document.getElementById('iocValue').value = value;
+        }
+
+        // Handle form submission
+        document.getElementById('iocForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const iocType = document.getElementById('iocType').value;
+            const iocValue = document.getElementById('iocValue').value.trim();
+            
+            if (!iocValue) {
+                alert('Please enter an IOC value');
+                return;
+            }
+            
+            // Show loading
+            document.getElementById('loadingIndicator').classList.remove('hidden');
+            document.getElementById('resultsContainer').classList.add('hidden');
+            document.getElementById('analyzeBtn').disabled = true;
+            
+            try {
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        type: iocType,
+                        ioc: iocValue
+                    })
+                });
+                
+                const result = await response.json();
+                currentResult = result;
+                
+                if (response.ok) {
+                    displayResults(result);
+                    loadHistory();
+                } else {
+                    alert('Error: ' + (result.error || 'Analysis failed'));
+                }
+                
+            } catch (error) {
+                alert('Network error: ' + error.message);
+            } finally {
+                document.getElementById('loadingIndicator').classList.add('hidden');
+                document.getElementById('analyzeBtn').disabled = false;
+            }
+        });
+
+        // Display analysis results
+        function displayResults(result) {
+            // Show results container
+            document.getElementById('resultsContainer').classList.remove('hidden');
+            
+            // Update verdict card
+            document.getElementById('resultIOC').textContent = result.ioc;
+            document.getElementById('resultType').textContent = result.type.toUpperCase();
+            
+            // Verdict badge
+            const verdictBadge = document.getElementById('verdictBadge');
+            const verdict = result.verdict;
+            verdictBadge.textContent = verdict.toUpperCase();
+            
+            // Verdict colors
+            const verdictColors = {
+                'malicious': 'bg-red-100 text-red-800',
+                'suspicious': 'bg-yellow-100 text-yellow-800',
+                'unknown': 'bg-gray-100 text-gray-800',
+                'benign': 'bg-green-100 text-green-800',
+                'error': 'bg-red-100 text-red-800'
+            };
+            
+            verdictBadge.className = `px-3 py-1 rounded-full text-sm font-medium ${verdictColors[verdict] || verdictColors.unknown}`;
+            
+            // Confidence score
+            const confidence = Math.round(result.confidence);
+            document.getElementById('confidenceScore').textContent = confidence + '%';
+            
+            const confidenceBar = document.getElementById('confidenceBar');
+            confidenceBar.style.width = confidence + '%';
+            
+            // Confidence bar colors
+            if (confidence >= 70) {
+                confidenceBar.className = 'h-2 rounded-full bg-red-500';
+            } else if (confidence >= 40) {
+                confidenceBar.className = 'h-2 rounded-full bg-yellow-500';
+            } else {
+                confidenceBar.className = 'h-2 rounded-full bg-green-500';
+            }
+            
+            // Intelligence sources
+            const sourcesList = document.getElementById('sourcesList');
+            sourcesList.innerHTML = '';
+            
+            if (result.sources && result.sources.length > 0) {
+                result.sources.forEach(source => {
+                    const sourceDiv = document.createElement('div');
+                    sourceDiv.className = 'flex items-center bg-blue-50 px-3 py-2 rounded-md';
+                    sourceDiv.innerHTML = `
+                        <span class="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
+                        <span class="text-blue-800">${source}</span>
+                    `;
+                    sourcesList.appendChild(sourceDiv);
+                });
+            } else {
+                sourcesList.innerHTML = '<p class="text-gray-500">No intelligence sources available</p>';
+            }
+            
+            // Detailed analysis
+            const detailsContent = document.getElementById('detailsContent');
+            detailsContent.innerHTML = '';
+            
+            if (result.details && Object.keys(result.details).length > 0) {
+                Object.entries(result.details).forEach(([key, value]) => {
+                    const detailDiv = document.createElement('div');
+                    detailDiv.className = 'border-l-4 border-blue-500 pl-4';
+                    detailDiv.innerHTML = `
+                        <h4 class="font-medium text-gray-800 capitalize">${key} Analysis</h4>
+                        <pre class="text-sm text-gray-600 mt-1 whitespace-pre-wrap">${JSON.stringify(value, null, 2)}</pre>
+                    `;
+                    detailsContent.appendChild(detailDiv);
+                });
+            } else {
+                detailsContent.innerHTML = '<p class="text-gray-500">No detailed analysis available</p>';
+            }
+            
+            // JSON report
+            document.getElementById('jsonReport').textContent = JSON.stringify(result, null, 2);
+        }
+
+        // Download report
+        function downloadReport() {
+            if (!currentResult) return;
+            
+            const dataStr = JSON.stringify(currentResult, null, 2);
+            const dataBlob = new Blob([dataStr], {type: 'application/json'});
+            
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(dataBlob);
+            link.download = `ioc-analysis-${currentResult.type}-${Date.now()}.json`;
+            link.click();
+        }
+
+        // Load analysis history
+        async function loadHistory() {
+            try {
+                const response = await fetch('/history');
+                const history = await response.json();
+                
+                const historyContainer = document.getElementById('historyContainer');
+                
+                if (history.length === 0) {
+                    historyContainer.innerHTML = '<p class="text-gray-500">No analyses performed yet.</p>';
+                    return;
+                }
+                
+                historyContainer.innerHTML = '';
+                
+                history.slice(-10).reverse().forEach((item, index) => {
+                    const historyItem = document.createElement('div');
+                    historyItem.className = 'border-b border-gray-200 py-3 last:border-b-0';
+                    
+                    const verdictColors = {
+                        'malicious': 'text-red-600',
+                        'suspicious': 'text-yellow-600',
+                        'unknown': 'text-gray-600',
+                        'benign': 'text-green-600'
+                    };
+                    
+                    historyItem.innerHTML = `
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <span class="font-mono text-sm">${item.ioc}</span>
+                                <span class="text-xs text-gray-500 ml-2">(${item.type})</span>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm ${verdictColors[item.verdict] || 'text-gray-600'}">${item.verdict}</span>
+                                <span class="text-xs text-gray-500">${Math.round(item.confidence)}%</span>
+                                <span class="text-xs text-gray-400">${new Date(item.timestamp).toLocaleTimeString()}</span>
+                            </div>
+                        </div>
+                    `;
+                    
+                    historyContainer.appendChild(historyItem);
+                });
+                
+            } catch (error) {
+                console.error('Failed to load history:', error);
+            }
+        }
+
+        // Load history on page load
+        loadHistory();
+    </script>
+</body>
+</html>
