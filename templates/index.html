@@ -140,10 +140,93 @@
     <script>
         let currentResult = null;
 
+        // Input validation functions
+        function validateURL(url) {
+            const urlPattern = /^https?:\/\/.+/i;
+            return urlPattern.test(url);
+        }
+
+        function validateIP(ip) {
+            const ipPattern = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+            return ipPattern.test(ip);
+        }
+
+        function validateDomain(domain) {
+            const domainPattern = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?\.([a-zA-Z]{2,}\.?)+$/;
+            return domainPattern.test(domain) && !domain.includes('://');
+        }
+
+        function validateHash(hash) {
+            // MD5 (32), SHA1 (40), SHA256 (64) hex characters
+            const hashPattern = /^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{40}$|^[a-fA-F0-9]{64}$/;
+            return hashPattern.test(hash);
+        }
+
+        // Update placeholder and validation based on IOC type
+        function updateInputPlaceholder() {
+            const iocType = document.getElementById('iocType').value;
+            const iocInput = document.getElementById('iocValue');
+            
+            const placeholders = {
+                'url': 'Enter URL (e.g., https://example.com/path)',
+                'ip': 'Enter IP address (e.g., 192.168.1.1)',
+                'domain': 'Enter domain name (e.g., example.com)',
+                'hash': 'Enter file hash (MD5, SHA1, or SHA256)'
+            };
+            
+            iocInput.placeholder = placeholders[iocType];
+            iocInput.value = ''; // Clear input when type changes
+            
+            // Remove any existing validation styling
+            iocInput.classList.remove('border-red-500', 'border-green-500');
+        }
+
+        // Real-time validation
+        function validateInput() {
+            const iocType = document.getElementById('iocType').value;
+            const iocValue = document.getElementById('iocValue').value.trim();
+            const iocInput = document.getElementById('iocValue');
+            
+            if (!iocValue) {
+                iocInput.classList.remove('border-red-500', 'border-green-500');
+                return false;
+            }
+            
+            let isValid = false;
+            
+            switch(iocType) {
+                case 'url':
+                    isValid = validateURL(iocValue);
+                    break;
+                case 'ip':
+                    isValid = validateIP(iocValue);
+                    break;
+                case 'domain':
+                    isValid = validateDomain(iocValue);
+                    break;
+                case 'hash':
+                    isValid = validateHash(iocValue);
+                    break;
+            }
+            
+            // Update visual feedback
+            if (isValid) {
+                iocInput.classList.remove('border-red-500');
+                iocInput.classList.add('border-green-500');
+            } else {
+                iocInput.classList.remove('border-green-500');
+                iocInput.classList.add('border-red-500');
+            }
+            
+            return isValid;
+        }
+
         // Set example IOC
         function setExample(type, value) {
             document.getElementById('iocType').value = type;
+            updateInputPlaceholder();
             document.getElementById('iocValue').value = value;
+            validateInput();
         }
 
         // Handle form submission
@@ -155,6 +238,19 @@
             
             if (!iocValue) {
                 alert('Please enter an IOC value');
+                return;
+            }
+            
+            // Validate input format
+            if (!validateInput()) {
+                const errorMessages = {
+                    'url': 'Please enter a valid URL starting with http:// or https://',
+                    'ip': 'Please enter a valid IP address (e.g., 192.168.1.1)',
+                    'domain': 'Please enter a valid domain name (e.g., example.com)',
+                    'hash': 'Please enter a valid hash (32, 40, or 64 hex characters)'
+                };
+                
+                alert('Invalid format: ' + errorMessages[iocType]);
                 return;
             }
             
@@ -192,6 +288,10 @@
                 document.getElementById('analyzeBtn').disabled = false;
             }
         });
+
+        // Add event listeners
+        document.getElementById('iocType').addEventListener('change', updateInputPlaceholder);
+        document.getElementById('iocValue').addEventListener('input', validateInput);
 
         // Display analysis results
         function displayResults(result) {
@@ -335,8 +435,9 @@
             }
         }
 
-        // Load history on page load
+        // Load history on page load and initialize validation
         loadHistory();
+        updateInputPlaceholder();
     </script>
 </body>
 </html>
