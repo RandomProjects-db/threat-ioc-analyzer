@@ -2,6 +2,10 @@
 
 A comprehensive web-based tool for analyzing Indicators of Compromise (IOCs) using multiple threat intelligence sources.
 
+## 🎥 Demo Video
+
+**[Watch Live Demo](https://www.youtube.com/watch?v=cWVos6_uCwU)** - See real-time IOC analysis with VirusTotal integration and threat intelligence scoring.
+
 ## 🎯 Features
 
 ### 🔍 **Multi-IOC Support**
