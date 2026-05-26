@@ -1,23 +1,21 @@
-from flask import Flask, render_template, request, jsonify
-import requests
-import hashlib
+import os
 import re
 import time
 from datetime import datetime
-import json
+from flask import Flask, render_template, request, jsonify
+import requests
 
 app = Flask(__name__)
 
-# VirusTotal API Configuration
-VT_API_KEY = "5eab21825602e3e6bb6cbb843a1f466ddafdc4cc00e9596f8ffb290ec34e94ff"
+VT_API_KEY = os.environ.get("VT_API_KEY")
 VT_BASE_URL = "https://www.virustotal.com/vtapi/v2"
+
 
 class IOCAnalyzer:
     def __init__(self):
         self.analysis_history = []
-    
-    def analyze_ioc(self, ioc_value, ioc_type):
-        """Main analysis function"""
+
+    def analyze_ioc(self, ioc_value: str, ioc_type: str) -> dict:
         result = {
             "ioc": ioc_value,
             "type": ioc_type,
@@ -25,252 +23,176 @@ class IOCAnalyzer:
             "verdict": "unknown",
             "confidence": 0,
             "sources": [],
-            "details": {}
+            "details": {},
         }
-        
+
+        handlers = {
+            "url": self._analyze_url,
+            "ip": self._analyze_ip,
+            "domain": self._analyze_domain,
+            "hash": self._analyze_hash,
+        }
+
+        handler = handlers.get(ioc_type)
+        if not handler:
+            result["error"] = f"Unsupported IOC type: {ioc_type}"
+            return result
+
         try:
-            if ioc_type == "url":
-                result = self._analyze_url(ioc_value, result)
-            elif ioc_type == "ip":
-                result = self._analyze_ip(ioc_value, result)
-            elif ioc_type == "domain":
-                result = self._analyze_domain(ioc_value, result)
-            elif ioc_type == "hash":
-                result = self._analyze_hash(ioc_value, result)
-            
-            # Calculate final verdict
+            result = handler(ioc_value, result)
             result = self._calculate_verdict(result)
-            
+        except requests.RequestException as e:
+            result["error"] = f"API request failed: {e}"
+            result["verdict"] = "error"
         except Exception as e:
             result["error"] = str(e)
             result["verdict"] = "error"
-        
+
         self.analysis_history.append(result)
         return result
-    
-    def _analyze_url(self, url, result):
-        """Analyze URL using VirusTotal"""
-        # VirusTotal URL scan
-        vt_result = self._query_virustotal_url(url)
+
+    def _analyze_url(self, url: str, result: dict) -> dict:
+        vt_result = self._vt_request("url", url)
         if vt_result:
             result["sources"].append("VirusTotal")
             result["details"]["virustotal"] = vt_result
-            
-            # Calculate threat score from VT results
-            if "positives" in vt_result and "total" in vt_result:
-                positives = vt_result["positives"]
-                total = vt_result["total"]
-                if total > 0:
-                    threat_ratio = positives / total
-                    result["confidence"] += min(90, threat_ratio * 100)
-        
-        # Basic URL analysis
+            result["confidence"] += self._score_from_detections(vt_result)
+
         suspicious_patterns = [
-            r'bit\.ly', r'tinyurl', r'[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}',
-            r'[a-z0-9]{20,}\.com', r'\.tk$', r'\.ml$'
+            r'bit\.ly', r'tinyurl', r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}',
+            r'[a-z0-9]{20,}\.com', r'\.(tk|ml|ga|cf|pw)$'
         ]
-        
-        for pattern in suspicious_patterns:
-            if re.search(pattern, url, re.IGNORECASE):
-                result["confidence"] += 15
-                result["sources"].append("Pattern Analysis")
-                break
-        
+        if any(re.search(p, url, re.IGNORECASE) for p in suspicious_patterns):
+            result["confidence"] += 15
+            result["sources"].append("Pattern Analysis")
+
         return result
-    
-    def _analyze_ip(self, ip, result):
-        """Analyze IP address"""
-        # VirusTotal IP report
-        vt_result = self._query_virustotal_ip(ip)
+
+    def _analyze_ip(self, ip: str, result: dict) -> dict:
+        if re.match(r'^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)', ip):
+            result["verdict"] = "benign"
+            result["confidence"] = 95
+            result["sources"].append("Private IP Range")
+            return result
+
+        vt_result = self._vt_request("ip", ip)
         if vt_result:
             result["sources"].append("VirusTotal")
             result["details"]["virustotal"] = vt_result
-            
-            # Check for malicious detections
-            if "detected_urls" in vt_result:
-                detected = len(vt_result["detected_urls"])
-                if detected > 0:
-                    result["confidence"] += min(80, detected * 10)
-        
-        # Basic IP analysis
-        private_ranges = [
-            r'^10\.', r'^192\.168\.', r'^172\.(1[6-9]|2[0-9]|3[01])\.'
-        ]
-        
-        for pattern in private_ranges:
-            if re.match(pattern, ip):
-                result["verdict"] = "benign"
-                result["confidence"] = 95
-                result["sources"].append("Private IP Range")
-                break
-        
+            detected = len(vt_result.get("detected_urls", []))
+            if detected > 0:
+                result["confidence"] += min(80, detected * 10)
+
         return result
-    
-    def _analyze_domain(self, domain, result):
-        """Analyze domain name"""
-        # VirusTotal domain report
-        vt_result = self._query_virustotal_domain(domain)
+
+    def _analyze_domain(self, domain: str, result: dict) -> dict:
+        vt_result = self._vt_request("domain", domain)
         if vt_result:
             result["sources"].append("VirusTotal")
             result["details"]["virustotal"] = vt_result
-            
-            # Check for malicious detections
-            if "detected_urls" in vt_result:
-                detected = len(vt_result["detected_urls"])
-                if detected > 0:
-                    result["confidence"] += min(70, detected * 5)
-        
-        # Domain reputation analysis
+            detected = len(vt_result.get("detected_urls", []))
+            if detected > 0:
+                result["confidence"] += min(70, detected * 5)
+
         suspicious_tlds = ['.tk', '.ml', '.ga', '.cf', '.pw']
         if any(domain.endswith(tld) for tld in suspicious_tlds):
             result["confidence"] += 25
             result["sources"].append("Suspicious TLD")
-        
-        # Domain age simulation (newer domains more suspicious)
-        if len(domain) > 20 or any(char.isdigit() for char in domain):
+
+        if len(domain) > 20 or re.search(r'\d', domain):
             result["confidence"] += 15
             result["sources"].append("Domain Analysis")
-        
+
         return result
-    
-    def _analyze_hash(self, file_hash, result):
-        """Analyze file hash"""
-        # VirusTotal file report
-        vt_result = self._query_virustotal_hash(file_hash)
+
+    def _analyze_hash(self, file_hash: str, result: dict) -> dict:
+        vt_result = self._vt_request("hash", file_hash)
         if vt_result:
             result["sources"].append("VirusTotal")
             result["details"]["virustotal"] = vt_result
-            
-            # Calculate threat score from VT results
-            if "positives" in vt_result and "total" in vt_result:
-                positives = vt_result["positives"]
-                total = vt_result["total"]
-                if total > 0:
-                    threat_ratio = positives / total
-                    result["confidence"] += min(95, threat_ratio * 100)
-        
+            result["confidence"] += self._score_from_detections(vt_result, cap=95)
+
         return result
-    
-    def _query_virustotal_url(self, url):
-        """Query VirusTotal URL API"""
+
+    def _vt_request(self, ioc_type: str, value: str) -> dict | None:
+        if not VT_API_KEY:
+            return None
+
         try:
-            # First, submit URL for scanning
-            params = {
-                'apikey': VT_API_KEY,
-                'url': url
-            }
-            
-            response = requests.post(f"{VT_BASE_URL}/url/scan", data=params)
-            if response.status_code == 200:
-                scan_result = response.json()
-                
-                # Wait a moment then get report
+            if ioc_type == "url":
+                requests.post(f"{VT_BASE_URL}/url/scan", data={"apikey": VT_API_KEY, "url": value})
                 time.sleep(2)
-                
-                report_params = {
-                    'apikey': VT_API_KEY,
-                    'resource': url
-                }
-                
-                report_response = requests.get(f"{VT_BASE_URL}/url/report", params=report_params)
-                if report_response.status_code == 200:
-                    return report_response.json()
-            
-        except Exception as e:
-            print(f"VirusTotal URL query error: {e}")
-        
+                r = requests.get(f"{VT_BASE_URL}/url/report", params={"apikey": VT_API_KEY, "resource": value}, timeout=10)
+            elif ioc_type == "ip":
+                r = requests.get(f"{VT_BASE_URL}/ip-address/report", params={"apikey": VT_API_KEY, "ip": value}, timeout=10)
+            elif ioc_type == "domain":
+                r = requests.get(f"{VT_BASE_URL}/domain/report", params={"apikey": VT_API_KEY, "domain": value}, timeout=10)
+            elif ioc_type == "hash":
+                r = requests.get(f"{VT_BASE_URL}/file/report", params={"apikey": VT_API_KEY, "resource": value}, timeout=10)
+            else:
+                return None
+
+            if r.status_code == 200:
+                return r.json()
+            if r.status_code == 204:
+                time.sleep(15)  # Rate limited, wait and retry once
+                r = requests.get(r.url, timeout=10)
+                return r.json() if r.status_code == 200 else None
+        except requests.RequestException:
+            pass
         return None
-    
-    def _query_virustotal_ip(self, ip):
-        """Query VirusTotal IP API"""
-        try:
-            params = {
-                'apikey': VT_API_KEY,
-                'ip': ip
-            }
-            
-            response = requests.get(f"{VT_BASE_URL}/ip-address/report", params=params)
-            if response.status_code == 200:
-                return response.json()
-                
-        except Exception as e:
-            print(f"VirusTotal IP query error: {e}")
-        
-        return None
-    
-    def _query_virustotal_domain(self, domain):
-        """Query VirusTotal Domain API"""
-        try:
-            params = {
-                'apikey': VT_API_KEY,
-                'domain': domain
-            }
-            
-            response = requests.get(f"{VT_BASE_URL}/domain/report", params=params)
-            if response.status_code == 200:
-                return response.json()
-                
-        except Exception as e:
-            print(f"VirusTotal Domain query error: {e}")
-        
-        return None
-    
-    def _query_virustotal_hash(self, file_hash):
-        """Query VirusTotal File Hash API"""
-        try:
-            params = {
-                'apikey': VT_API_KEY,
-                'resource': file_hash
-            }
-            
-            response = requests.get(f"{VT_BASE_URL}/file/report", params=params)
-            if response.status_code == 200:
-                return response.json()
-                
-        except Exception as e:
-            print(f"VirusTotal Hash query error: {e}")
-        
-        return None
-    
-    def _calculate_verdict(self, result):
-        """Calculate final verdict based on confidence score"""
-        confidence = result["confidence"]
-        
-        if confidence >= 70:
+
+    def _score_from_detections(self, vt_result: dict, cap: int = 90) -> int:
+        positives = vt_result.get("positives", 0)
+        total = vt_result.get("total", 0)
+        if total == 0:
+            return 0
+        return min(cap, int((positives / total) * 100))
+
+    def _calculate_verdict(self, result: dict) -> dict:
+        c = result["confidence"]
+        if c >= 70:
             result["verdict"] = "malicious"
-        elif confidence >= 40:
+        elif c >= 40:
             result["verdict"] = "suspicious"
-        elif confidence >= 10:
+        elif c >= 10:
             result["verdict"] = "unknown"
         else:
             result["verdict"] = "benign"
-        
         return result
 
-# Initialize analyzer
+
 analyzer = IOCAnalyzer()
+
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
+
 @app.route('/analyze', methods=['POST'])
 def analyze():
     data = request.get_json()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
     ioc_value = data.get('ioc', '').strip()
-    ioc_type = data.get('type', '')
-    
+    ioc_type = data.get('type', '').strip()
+
     if not ioc_value or not ioc_type:
         return jsonify({"error": "IOC value and type are required"}), 400
-    
-    # Analyze the IOC
+
+    if ioc_type not in ("url", "ip", "domain", "hash"):
+        return jsonify({"error": f"Invalid type: {ioc_type}"}), 400
+
     result = analyzer.analyze_ioc(ioc_value, ioc_type)
-    
     return jsonify(result)
+
 
 @app.route('/history')
 def history():
-    return jsonify(analyzer.analysis_history)
+    return jsonify(analyzer.analysis_history[-50:])  # Last 50 only
+
 
 @app.route('/report/<int:index>')
 def report(index):
@@ -278,5 +200,8 @@ def report(index):
         return jsonify(analyzer.analysis_history[index])
     return jsonify({"error": "Report not found"}), 404
 
+
 if __name__ == '__main__':
+    if not VT_API_KEY:
+        print("WARNING: VT_API_KEY not set. VirusTotal lookups will be skipped.")
     app.run(debug=True, host='0.0.0.0', port=5001)
