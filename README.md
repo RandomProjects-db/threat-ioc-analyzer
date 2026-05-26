@@ -1,3 +1,4 @@
+![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/RandomProjects-db/threat-ioc-analyzer?utm_source=oss&utm_medium=github&utm_campaign=RandomProjects-db%2Fthreat-ioc-analyzer&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
 # 🔍 Threat IOC Analysis Tool
 
 A comprehensive web-based tool for analyzing Indicators of Compromise (IOCs) using multiple threat intelligence sources.
